@@ -68,6 +68,9 @@ class InvertedIndex:
     def get_bm25_idf(self, term: str) -> float:
         """
         Calculate the BM25 inverse document frequency for a given term.
+        Inverse document frequency (IDF) measures how important a term is across all documents. How unique or rare a term is.
+        Higher IDF means the term is more unique, lower IDF means it is more common.
+
         How this works:
         - uses BM25 IDF formula: log((N - df + 0.5) / (df + 0.5) + 1) where
             - N is the total number of documents
@@ -94,6 +97,7 @@ class InvertedIndex:
     def get_bm25_tf(self, doc_id, term, k1=BM25_K1, b=BM25_B):
         """
         Calculate the BM25 term frequency for a given term in a document.
+        This is the frequency of the term in the document adjusted for document length and term saturation.
         How this works:
             - term frequency (tf) is scaled by document length and parameters k1 and b
             - length normalization is applied based on average document length
@@ -123,7 +127,9 @@ class InvertedIndex:
             term (str): The term to calculate BM25 score for
 
         Returns:
-            float: The BM25 score value
+            float: The BM25 score value. This is the product of BM25 TF and BM25 IDF.
+            Simply put it represents the relevance of the term in the document adjusted for term frequency and document frequency.
+
         """
         tf = self.get_bm25_tf(doc_id, term)
         idf = self.get_bm25_idf(term)
