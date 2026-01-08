@@ -8,6 +8,7 @@ from lib.local_llm import (
     expand_query,
     rank_results,
     batch_rank_results,
+    judge_relevance,
 )
 from sentence_transformers import CrossEncoder
 
@@ -62,6 +63,11 @@ def main() -> None:
         type=str,
         choices=["individual", "batch", "cross_encoder"],
         help="Reranking method to apply after RRF",
+    )
+    rrf_search_parser.add_argument(
+        "--evaluate",
+        action="store_true",
+        help="Evaluate search results against golden dataset",
     )
     args = parser.parse_args()
 
@@ -164,10 +170,10 @@ def main() -> None:
                     ])
                 # scores is a list of numbers, one for each pair
                 scores = cross_encoder.predict(pairs)
-                result = sorted(
+                ranked_result = sorted(
                     list(zip(results, scores)), key=lambda x: x[1], reverse=True
                 )[: args.limit]
-                for idx, ((doc_id, result), score) in enumerate(result, start=1):
+                for idx, ((doc_id, result), score) in enumerate(ranked_result, start=1):
                     doc = result["doc"]
                     bm25_rank = result["keyword_search_rank"]
                     semantic_rank = result["semantic_search_rank"]
@@ -175,6 +181,20 @@ def main() -> None:
                     print(
                         f"{idx}. {doc['title']}\n   Cross Encoder Score: {score:.4f})\n   RRF Score: {rrf_score}\n   BM25 Rank: {bm25_rank}, Semantic Rank: {semantic_rank}\n   {doc['description'][:100]}...\r\n"
                     )
+                if args.evaluate:
+                    print("Judging relevance of the reranked results...")
+                    formatted_results = [
+                        f"{doc['doc']['title']} - {doc['doc']['description']}"
+                        for (doc_id, doc), _ in ranked_result
+                    ]
+                    relevance_scores = judge_relevance(query, formatted_results)
+                    for idx, ((doc_id, result), _), relevance in zip(
+                        range(1, len(ranked_result) + 1),
+                        ranked_result,
+                        relevance_scores,
+                    ):
+                        doc = result["doc"]
+                        print(f"{idx}. {doc['title']} - Relevance Score: {relevance}")
                 return
             rrf_hybrid_search(query, args.k, args.limit)
 

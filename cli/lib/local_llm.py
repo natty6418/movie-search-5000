@@ -71,24 +71,31 @@ Corrected:"""
 
 
 def rewrite_query(query: str) -> str:
-    prompt = f"""Rewrite this movie search query to be more specific and searchable.
+    prompt = f"""
+You are an expert movie search query rewriter.
 
-Original: "{query}"
+Your task is to convert a natural-language movie search query into a precise, database-friendly search query that captures the user’s intent.
 
-Consider:
-- Common movie knowledge (famous actors, popular films)
-- Genre conventions (horror = scary, animation = cartoon)
-- Keep it concise (under 10 words)
-- It should be a google style search query that's very specific
-- Don't use boolean logic
+Rules:
+- Identify the core elements of the request: genre, tone, plot type, themes, style, era, or notable influences.
+- If a movie is referenced (e.g. “movies like Knives Out”), infer its defining traits (e.g. genre, structure, tone) rather than repeating the title.
+- Prefer descriptive attributes over vague wording.
+- Use concise keyword-style phrasing (Google-style search).
+- Keep the output under 10 words.
+- Do NOT use boolean operators (AND, OR, NOT).
+- Do NOT explain your reasoning.
+- Do NOT include quotes.
+- Output only the rewritten query.
 
 Examples:
+- "movies like Knives Out" → "modern whodunit mystery ensemble cast"
+- "that bear movie where leo gets attacked" → "The Revenant Leonardo DiCaprio bear attack"
+- "movie about bear in london with marmalade" → "Paddington London marmalade"
+- "scary movie with bear from few years ago" → "bear horror movie 2015-2020"
+- "funny murder mystery like glass onion" → "satirical murder mystery ensemble comedy"
 
-- "that bear movie where leo gets attacked" -> "The Revenant Leonardo DiCaprio bear attack"
-- "movie about bear in london with marmalade" -> "Paddington London marmalade"
-- "scary movie with bear from few years ago" -> "bear horror movie 2015-2020"
-
-**Only provide the rewritten query!**
+Original query:
+{query}
 
 Rewritten query:"""
     try:
@@ -152,7 +159,7 @@ def rank_results(query: str, doc: dict) -> str:
     return cleaned or query
 
 
-def batch_rank_results(query: str, docs: list[dict]) -> list[int]:
+def batch_rank_results(query: str, docs: list[dict]) -> list[str]:
     allowed_ids = [d["id"] for d in docs]
 
     movies_compact = [
@@ -182,6 +189,30 @@ Rules:
 Output format example:
 [1771, 12, 34]
 """.strip()
+
+    response = _call_local_llm(prompt).strip()
+    return json.loads(response)
+
+
+def judge_relevance(query: str, formatted_results: list[str]) -> list[str]:
+    prompt = f"""Rate how relevant each result is to this query on a 0-3 scale:
+
+Query: "{query}"
+
+Results:
+{chr(10).join(formatted_results)}
+
+Scale:
+- 3: Highly relevant
+- 2: Relevant
+- 1: Marginally relevant
+- 0: Not relevant
+
+Do NOT give any numbers out than 0, 1, 2, or 3.
+
+Return ONLY the scores in the same order you were given the documents. Return a valid JSON list, nothing else. For example:
+
+[2, 0, 3, 2, 0, 1]"""
 
     response = _call_local_llm(prompt).strip()
     return json.loads(response)

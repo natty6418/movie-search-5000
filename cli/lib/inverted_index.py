@@ -64,7 +64,9 @@ class InvertedIndex:
     def get_tf(self, doc_id, term):
         tokenized_term = tokenize(term)
         if len(tokenized_term) > 1:
-            raise ValueError("Term must be a single word")
+            raise ValueError(f"Term ({term}) must be a single word")
+        if len(tokenized_term) == 0:
+            return 0
         token = tokenized_term[0]
         return self.term_frequencies.get(doc_id, {}).get(token, 0)
 
@@ -91,6 +93,8 @@ class InvertedIndex:
         tokenized_term = tokenize(term)
         if len(tokenized_term) > 1:
             raise ValueError("Term must be a single word")
+        if len(tokenized_term) == 0:
+            return 0.0
         token = tokenized_term[0]
         df = len(self.get_documents(token))
         N = len(self.docmap)

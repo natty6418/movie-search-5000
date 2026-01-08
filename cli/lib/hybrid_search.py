@@ -141,12 +141,41 @@ def hybrid_search(query, alpha, limit=5):
         )
 
 
-def rrf_hybrid_search(query, k, limit=5):
+def rrf_hybrid_search(query: str, k: int, limit: int = 5) -> list[tuple[str, dict]]:
+    """
+    Reciprocal Rank Fusion Hybrid Search
+    Prints the top results from RRF hybrid search for the given query.
+
+        Args:
+            query (str): The search query.
+            k (int): The RRF parameter.
+            limit (int): The number of top results to return.
+
+        Returns:
+
+        list: A list of tuples containing document IDs and their corresponding search results.
+        Each tuple is in the format (doc_id, result), where result is a dictionary containing
+        the document and its RRF score.
+
+        Output:
+        1. Movie Title 1 (score: 0.1234)
+           Movie description snippet...
+        ...
+        Example:
+        results = rrf_hybrid_search("science fiction adventure", k=60, limit=5)
+
+        # results = [
+        #   ('doc1', {
+        #       'doc': {...},
+        #       'rrf_score': 0.2345,
+        #       'keyword_search_rank': 2,
+        #       'semantic_search_rank': 3
+        #   }),
+    """
     with open(movies_path, "r", encoding="utf-8") as f:
         movies_list = json.load(f)["movies"]
     if movies_list is None or len(movies_list) == 0:
-        print("No movies found in the dataset.")
-        return
+        raise ValueError("No movies found in the dataset.")
     model = HybridSearch(movies_list)
     results = model.rrf_search(query, k, limit)
     for idx, (doc_id, result) in enumerate(results, start=1):
