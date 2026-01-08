@@ -32,6 +32,9 @@ class InvertedIndex:
         self.movies_path = os.path.join(
             os.path.dirname(__file__), "../../data/movies.json"
         )
+        self.index_path = os.path.join(
+            os.path.dirname(__file__), "../../cache/index.pkl"
+        )
 
     def __add_document(self, doc_id, text):
         for word in tokenize(text):
