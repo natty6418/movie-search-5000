@@ -8,10 +8,11 @@ import urllib.error
 import urllib.request
 
 from dotenv import load_dotenv
+from colorama import Fore, Style
 
 load_dotenv()
 
-LOCAL_LLM_MODEL = os.environ.get("LOCAL_LLM_MODEL", "llama3.2:3b")
+LOCAL_LLM_MODEL = os.environ.get("LOCAL_LLM_MODEL", "qwen2.5:7b-instruct")
 LOCAL_LLM_BASE_URL = os.environ.get("LOCAL_LLM_URL", "http://localhost:11434")
 LOCAL_LLM_ENDPOINT = os.environ.get(
     "LOCAL_LLM_ENDPOINT", f"{LOCAL_LLM_BASE_URL.rstrip('/')}/api/generate"
@@ -138,7 +139,7 @@ def rank_results(query: str, doc: dict) -> str:
     prompt = f"""Rate how well this movie matches the search query.
     
     Query: "{query}"
-    Movie: {doc.get("title", "")} - {doc.get("document", "")}
+    Movie: {doc.get("title", "")} - {doc.get("description", "")}
     
     Consider:
     - Direct relevance to query
@@ -216,3 +217,108 @@ Return ONLY the scores in the same order you were given the documents. Return a 
 
     response = _call_local_llm(prompt).strip()
     return json.loads(response)
+
+
+def rag_answer(query: str, docs: list[dict[str, str]]) -> str:
+
+    print(Fore.YELLOW + "Query: " + query + Style.RESET_ALL)
+    prompt = f"""Answer the question or provide information based on the provided documents. This should be tailored to Hoopla users. Hoopla is a movie streaming service.
+    
+    Query: {query}
+    
+    Documents:
+    {json.dumps(docs, ensure_ascii=False)}
+    
+    Provide a comprehensive answer that addresses the query:"""
+
+    response = _call_local_llm(prompt).strip()
+    return response
+
+
+def summarize(query: str, docs: list[dict[str, str]]) -> str:
+    prompt = f"""
+Provide information useful to this query by synthesizing information from multiple search results in detail.
+The goal is to provide comprehensive information so that users know what their options are.
+Your response should be information-dense and concise, with several key pieces of information about the genre, plot, etc. of each movie.
+This should be tailored to Hoopla users. Hoopla is a movie streaming service.
+Query: {query}
+Search Results:
+{json.dumps(docs, ensure_ascii=False)}
+Provide a comprehensive 3–4 sentence answer that combines information from multiple sources:
+"""
+
+    response = _call_local_llm(prompt).strip()
+    return response
+def _format_docs_for_prompt(docs: list[dict[str, str]]) -> str:
+    lines = []
+    for i, d in enumerate(docs, start=1):
+        doc_id = d.get("id", "")
+        title = d.get("title", "")
+        text = d.get('description', "")  # adapt to your schema
+        lines.append(
+            f"[{i}] id={doc_id!r} title={title!r}\n"
+            f"    text={text}\n"
+        )
+    return "\n".join(lines)
+import re
+
+def _strip_invalid_citations(answer: str, n_docs: int) -> str:
+    def repl(m: re.Match) -> str:
+        k = int(m.group(1))
+        return m.group(0) if 1 <= k <= n_docs else ""
+    return re.sub(r"\[(\d+)\]", repl, answer).strip()
+
+def generate_citations(query: str, docs: list[dict[str, str]]) -> str:
+    if not query or not query.strip():
+        raise ValueError("query must be non-empty")
+    if not docs:
+        return "I don't have enough information."
+
+    docs_block = _format_docs_for_prompt(docs)
+    n = len(docs)
+
+    prompt = f"""You are Hoopla's movie helper. Answer using ONLY the documents below.
+
+Query: {query}
+
+Documents (cite using these numbers ONLY):
+{docs_block}
+
+Rules:
+- Use ONLY information explicitly supported by the documents.
+- Every factual sentence must end with citations like [1] or [1][2].
+- You may ONLY cite from [1]..[{n}]. Never cite anything else.
+- If the documents don't contain enough information to answer, say: "I don't have enough information."
+  Then give the best partial answer you can with citations.
+- Do NOT invent plot details.
+
+Answer:"""
+
+    response = _call_local_llm(prompt).strip()
+    response = _strip_invalid_citations(response, n)
+    return response
+
+
+def question_answering(question: str, docs: list[dict[str, str]]) -> str:
+    print(Fore.MAGENTA + "Question: " + question + Style.RESET_ALL)
+    context = _format_docs_for_prompt(docs)
+    prompt = f"""Answer the user's question based on the provided movies that are available on Hoopla.
+
+This should be tailored to Hoopla users. Hoopla is a movie streaming service. 
+
+Documents:
+{context}
+
+Instructions:
+- Answer questions directly and concisely
+- Be casual and conversational
+- Don't be cringe or hype-y
+- Talk like a normal person would in a chat conversation
+- DO NOT make up answers that are not found in the documents.
+- Do not ask for clarification.
+
+Question: {question}
+
+Answer:"""
+    response = _call_local_llm(prompt).strip()
+    return response

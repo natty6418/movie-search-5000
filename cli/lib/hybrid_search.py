@@ -4,6 +4,8 @@ import json
 from .inverted_index import InvertedIndex
 from .semantic_search import ChunkedSemanticSearch
 
+from sentence_transformers import CrossEncoder
+
 movies_path = os.path.join(os.path.dirname(__file__), "../../data/movies.json")
 
 
@@ -185,3 +187,24 @@ def rrf_hybrid_search(query: str, k: int, limit: int = 5) -> list[tuple[str, dic
             f"{idx}. {doc['title']} (score: {score:.4f})\n   {doc['description'][:100]}...\r\n"
         )
     return results
+
+
+def cross_encoder_rerank_results(results, query, limit):
+    if results is None:
+        raise ValueError("No results returned from RRF hybrid search")
+
+    pairs = []
+    cross_encoder = CrossEncoder("cross-encoder/ms-marco-TinyBERT-L2-v2")
+    for doc_id, result in results:
+        doc = result["doc"]
+        pairs.append([
+            query,
+            f"{doc.get('title', '')} - {doc.get('description', '')}",
+        ])
+    # scores is a list of numbers, one for each pair
+    scores = cross_encoder.predict(pairs)
+    ranked_result = sorted(
+        list(zip(results, scores)), key=lambda x: x[1], reverse=True
+    )[:limit]
+
+    return ranked_result

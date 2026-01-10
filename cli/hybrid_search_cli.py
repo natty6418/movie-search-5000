@@ -1,7 +1,14 @@
 import argparse
 
+from sentence_transformers import cross_encoder
 
-from lib.hybrid_search import normalize, hybrid_search, rrf_hybrid_search
+
+from lib.hybrid_search import (
+    normalize,
+    hybrid_search,
+    rrf_hybrid_search,
+    cross_encoder_rerank_results,
+)
 from lib.local_llm import (
     enhance_query,
     rewrite_query,
@@ -10,7 +17,6 @@ from lib.local_llm import (
     batch_rank_results,
     judge_relevance,
 )
-from sentence_transformers import CrossEncoder
 
 
 def main() -> None:
@@ -155,24 +161,7 @@ def main() -> None:
                     args.k,
                     args.limit * 5,
                 )
-                if results is None:
-                    raise ValueError("No results returned from RRF hybrid search")
-                print(
-                    f"Reranking top {args.limit} results using {args.rerank_method} method..."
-                )
-                pairs = []
-                cross_encoder = CrossEncoder("cross-encoder/ms-marco-TinyBERT-L2-v2")
-                for doc_id, result in results:
-                    doc = result["doc"]
-                    pairs.append([
-                        query,
-                        f"{doc.get('title', '')} - {doc.get('description', '')}",
-                    ])
-                # scores is a list of numbers, one for each pair
-                scores = cross_encoder.predict(pairs)
-                ranked_result = sorted(
-                    list(zip(results, scores)), key=lambda x: x[1], reverse=True
-                )[: args.limit]
+                ranked_result = cross_encoder_rerank_results(results, query, args.limit)
                 for idx, ((doc_id, result), score) in enumerate(ranked_result, start=1):
                     doc = result["doc"]
                     bm25_rank = result["keyword_search_rank"]
