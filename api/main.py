@@ -123,23 +123,50 @@ def health_check():
 @app.post("/agent")
 async def agent_endpoint(request: AgentQuery):
     graph = get_agent()
-    
-    # Construct initial state
-    messages = request.chat_history.copy()
-    messages.append({"role": "user", "content": request.query})
-    
-    inputs = {"messages": messages}
-    
-    # Run the graph
-    # We use invoke for a blocking call. 
-    # For streaming, we'd need a different setup (Server Sent Events), 
-    # but for now we'll return the final response.
+
+    # Construct initial state for the new agent structure
+    # The new agent expects: query, messages, retrieved_docs, limit, action
+    initial_state = {
+        "query": request.query,
+        "messages": request.chat_history.copy(),  # Preserve chat history
+        "retrieved_docs": [],
+        "limit": 5,
+        "action": ""
+    }
+
     try:
-        final_state = await graph.ainvoke(inputs)
-        last_message = final_state["messages"][-1]
+        # Run the graph - use invoke (not ainvoke) since build_graph returns sync graph
+        final_state = graph.invoke(initial_state)
+        
+        # Extract the final assistant response from messages
+        messages = final_state.get("messages", [])
+        last_assistant_msg = None
+        for msg in reversed(messages):
+            if msg.get("role") == "assistant":
+                content = msg.get("content", "")
+                # Skip the "Enhanced query:" messages
+                if not content.startswith("Enhanced query:"):
+                    last_assistant_msg = content
+                    break
+        
+        if not last_assistant_msg:
+            last_assistant_msg = "No response generated."
+        
+        # Format retrieved docs for frontend (if needed)
+        retrieved_docs = final_state.get("retrieved_docs", [])
+        formatted_docs = []
+        for doc in retrieved_docs:
+            formatted_docs.append({
+                "title": doc.get("title", ""),
+                "description": doc.get("description", "")
+            })
+        
         return {
-            "answer": last_message["content"],
-            "messages": final_state["messages"] # Return full trace for debugging/UI
+            "answer": last_assistant_msg,
+            "messages": make_serializable(messages),  # Return full trace for debugging/UI
+            "retrieved_docs": formatted_docs,
+            "docs": formatted_docs,  # Alias for consistency with RAG endpoint
+            "query_used": final_state.get("query", request.query)
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -28,13 +28,10 @@ search_movies_tool = types.FunctionDeclaration(
     parameters={
         "type": "object",
         "properties": {
-            "query": {
-                "type": "string",
-                "description": "The search query for movies"
-            }
+            "query": {"type": "string", "description": "The search query for movies"}
         },
-        "required": ["query"]
-    }
+        "required": ["query"],
+    },
 )
 
 print("\n📡 Testing Gemini API connection...")
@@ -43,8 +40,7 @@ try:
     # Test 1: Basic chat
     print("Testing basic chat with gemini-3-flash-preview...")
     response = client.models.generate_content(
-        model='gemini-3-flash-preview',
-        contents="Say hello in 5 words"
+        model="gemini-2.5-flash-lite", contents="Say hello in 5 words"
     )
     print(f"✓ Basic chat works!")
     print(f"  Response: {response.text[:100]}")
@@ -52,11 +48,11 @@ try:
     # Test 2: Function calling
     print("\n📞 Testing function calling...")
     response = client.models.generate_content(
-        model='gemini-3-flash-preview',
+        model="gemini-3-flash-preview",
         contents="Find me action movies from the 90s",
         config=types.GenerateContentConfig(
             tools=[types.Tool(function_declarations=[search_movies_tool])]
-        )
+        ),
     )
 
     # Check if function was called

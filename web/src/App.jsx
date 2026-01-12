@@ -21,9 +21,6 @@ function App() {
   const [enhancedQuery, setEnhancedQuery] = useState(null);
   const [enhanceMode, setEnhanceMode] = useState('none'); // none, fix_spelling, rewrite, expand
   const [bm25Type, setBm25Type] = useState('combined'); // unigram, bigram, combined
-
-  // Hybrid options
-  const [hybridAlpha, setHybridAlpha] = useState(0.5);
   
   // RAG options
   const [ragMode, setRagMode] = useState('rag'); // rag, summarize, citation, question
@@ -37,7 +34,6 @@ function App() {
     setEnhancedQuery(null);
 
     try {
-      let res;
       if (mode === 'keyword') {
         const data = await searchKeywords(query, 10, enhanceMode, bm25Type);
         setResults(data.results);
@@ -271,14 +267,13 @@ function App() {
             <div className="flex justify-center gap-8">
                  <div className="text-center">
                     <p className="font-bold text-xs uppercase mb-1">Created By</p>
-                    <a href="https://github.com/bootdotdev" target="_blank" className="font-heading text-xl">BOOT.DEV</a>
+                    <a href="https://github.com/natty6418" target="_blank" className="font-heading text-xl">Natty6416</a>
                  </div>
                  <div className="text-center">
                     <p className="font-bold text-xs uppercase mb-1">Visitor Count</p>
                     <HitCounter />
                  </div>
             </div>
-
             <div className="flex justify-center gap-2 text-xs font-mono text-retro-muted">
                 <span>[Home]</span>
                 <span>[Email Us]</span>

@@ -1,4 +1,4 @@
-"""Utilities for talking to an LLM via Hugging Face Inference API."""
+"""Utilities for talking to a local LLM via Ollama."""
 
 from __future__ import annotations
 
@@ -8,24 +8,27 @@ import re
 
 from dotenv import load_dotenv
 from colorama import Fore, Style
-from huggingface_hub import InferenceClient
+from openai import OpenAI
 
 load_dotenv()
 
-# Default to the requested model, but allow override via env var
-LLM_MODEL = os.environ.get("LLM_MODEL", "meta-llama/Llama-4-Scout-17B-16E-Instruct")
-HF_TOKEN = os.environ.get("HF_TOKEN")
+# Ollama configuration
+LOCAL_LLM_MODEL = os.environ.get("LOCAL_LLM_MODEL", "qwen2.5:7b-instruct")
+LOCAL_LLM_URL = os.environ.get("LOCAL_LLM_URL", "http://localhost:11434")
 
 class LocalLLMError(RuntimeError):
     """Raised when the LLM cannot be reached or returns invalid data."""
 
 def _call_local_llm(prompt: str, system_prompt: str = None, json_mode: bool = False) -> str:
     """
-    Calls the Hugging Face Inference API using the standard Chat Completion format.
+    Calls the local Ollama instance using OpenAI-compatible API.
     """
     try:
-        client = InferenceClient(token=HF_TOKEN)
-        
+        client = OpenAI(
+            base_url=f"{LOCAL_LLM_URL}/v1",
+            api_key="ollama"  # Ollama doesn't require a real key
+        )
+
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -33,24 +36,24 @@ def _call_local_llm(prompt: str, system_prompt: str = None, json_mode: bool = Fa
 
         # Set specific parameters for the generation
         response_format = {"type": "json_object"} if json_mode else None
-        
+
         response = client.chat.completions.create(
-            model=LLM_MODEL,
+            model=LOCAL_LLM_MODEL,
             messages=messages,
             max_tokens=1024,
             temperature=0.7,
             response_format=response_format
         )
-        
+
         content = response.choices[0].message.content
         if not content:
              raise LocalLLMError("LLM response payload was empty.")
-        
+
         return content.strip()
 
     except Exception as exc:
         raise LocalLLMError(
-            f"Error calling Hugging Face Inference API for model {LLM_MODEL}: {exc}"
+            f"Error calling Ollama for model {LOCAL_LLM_MODEL}: {exc}"
         ) from exc
 
 
