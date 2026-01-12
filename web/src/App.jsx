@@ -1,3 +1,4 @@
+import ReactMarkdown from 'react-markdown';
 import { useState } from 'react';
 import { Button } from './components/Button';
 import { Card } from './components/Card';
@@ -16,6 +17,11 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [ragAnswer, setRagAnswer] = useState(null);
   
+  // New state for enhanced query display
+  const [enhancedQuery, setEnhancedQuery] = useState(null);
+  const [enhanceMode, setEnhanceMode] = useState('none'); // none, fix_spelling, rewrite, expand
+  const [bm25Type, setBm25Type] = useState('combined'); // unigram, bigram, combined
+
   // Hybrid options
   const [hybridAlpha, setHybridAlpha] = useState(0.5);
   
@@ -28,20 +34,26 @@ function App() {
     setLoading(true);
     setResults([]);
     setRagAnswer(null);
+    setEnhancedQuery(null);
 
     try {
       let res;
       if (mode === 'keyword') {
-        const data = await searchKeywords(query);
+        const data = await searchKeywords(query, 10, enhanceMode, bm25Type);
         setResults(data.results);
+        if (data.query_used && data.query_used !== query) setEnhancedQuery(data.query_used);
       } else if (mode === 'semantic') {
-        const data = await searchSemantic(query);
+        const data = await searchSemantic(query, 10, enhanceMode);
         setResults(data.results);
+        if (data.query_used && data.query_used !== query) setEnhancedQuery(data.query_used);
       } else if (mode === 'hybrid') {
-        const data = await searchHybrid(query, 'weighted', parseFloat(hybridAlpha));
+        const data = await searchHybrid(query, 'rrf', 0.5, 60, 10, enhanceMode, bm25Type);
         setResults(data.results);
+        if (data.query_used && data.query_used !== query) setEnhancedQuery(data.query_used);
       } else if (mode === 'rag') {
-        const data = await performRag(query, ragMode);
+        const data = await performRag(query, ragMode, 5, enhanceMode, bm25Type);
+        if (data.query_used && data.query_used !== query) setEnhancedQuery(data.query_used);
+        
         if (ragMode === 'rag') {
             setRagAnswer(data.answer);
             setResults(data.docs.map(d => ({ ...d, score: 'N/A' })));
@@ -70,7 +82,7 @@ function App() {
 
   return (
     <div className="min-h-screen pb-16">
-      {/* Marquee Banner */}
+      {/* ... (rest of header) ... */}
       <RetroMarquee 
         text={[
             "WELCOME TO THE FUTURE OF MOVIE SEARCH", 
@@ -86,7 +98,7 @@ function App() {
         {/* Header Section */}
         <header className="text-center py-8 space-y-4">
            <h1 className="text-5xl md:text-7xl animate-rainbow drop-shadow-md select-none">
-              MOVIE_SEARCH_2000
+              MOVIE_SEARCH_5000
            </h1>
            <div className="inline-block bg-construction px-4 py-1 border-2 border-black rotate-[-2deg]">
               <span className="bg-black text-yellow-300 font-bold px-2 py-1 text-xl uppercase tracking-widest">
@@ -120,7 +132,7 @@ function App() {
                 </div>
 
                 {/* Search Bar */}
-                <div className="flex flex-col md:flex-row gap-4 items-end bg-[#E8E8E8] p-4 border-2 border-[#808080] border-t-black border-l-black">
+                <div className="flex flex-col lg:flex-row gap-4 items-end lg:items-center bg-[#E8E8E8] p-4 border-2 border-[#808080] border-t-black border-l-black">
                     <div className="flex-1 w-full space-y-2">
                         <label className="font-bold uppercase text-sm">Search Query:</label>
                         <Input 
@@ -131,39 +143,55 @@ function App() {
                             autoFocus
                         />
                     </div>
-                    
-                    {/* Contextual Options */}
-                    {mode === 'hybrid' && (
-                        <div className="w-full md:w-32 space-y-2">
-                            <label className="font-bold uppercase text-sm" title="0 = Semantic, 1 = Keyword">Alpha ({hybridAlpha})</label>
-                            <input 
-                                type="range" 
-                                min="0" 
-                                max="1" 
-                                step="0.1"
-                                value={hybridAlpha}
-                                onChange={(e) => setHybridAlpha(e.target.value)}
-                                className="w-full accent-blue-700"
-                            />
-                        </div>
-                    )}
 
-                    {mode === 'rag' && (
-                        <div className="w-full md:w-48 space-y-2">
-                            <label className="font-bold uppercase text-sm">Mode</label>
-                            <Select value={ragMode} onChange={(e) => setRagMode(e.target.value)}>
-                                <option value="rag">Standard Q&A</option>
-                                <option value="summarize">Summarize</option>
-                                <option value="citation">Citations</option>
-                                <option value="question">Chat</option>
+                    <div className="flex flex-wrap items-end gap-2 w-full lg:w-auto">
+                        <div className="space-y-2 flex-1 lg:flex-none">
+                             <label className="font-bold uppercase text-xs block">Enhance</label>
+                             <Select value={enhanceMode} onChange={(e) => setEnhanceMode(e.target.value)} className="w-full lg:w-32 text-sm">
+                                <option value="none">None</option>
+                                <option value="fix_spelling">Fix Spelling</option>
+                                <option value="rewrite">Rewrite</option>
+                                <option value="expand">Expand</option>
                             </Select>
                         </div>
-                    )}
 
-                    <Button variant="success" size="lg" onClick={handleSearch} disabled={loading}>
-                        {loading ? 'Processing...' : 'Search'}
-                    </Button>
+                        {mode !== 'semantic' && (
+                            <div className="space-y-2 flex-1 lg:flex-none">
+                                <label className="font-bold uppercase text-xs block">Keywords</label>
+                                <Select value={bm25Type} onChange={(e) => setBm25Type(e.target.value)} className="w-full lg:w-28 text-sm">
+                                    <option value="combined">Auto</option>
+                                    <option value="unigram">Standard</option>
+                                    <option value="bigram">Phrases</option>
+                                </Select>
+                            </div>
+                        )}
+
+                        {mode === 'rag' && (
+                            <div className="space-y-2 flex-1 lg:flex-none">
+                                <label className="font-bold uppercase text-xs block">Mode</label>
+                                <Select value={ragMode} onChange={(e) => setRagMode(e.target.value)} className="w-full lg:w-32 text-sm">
+                                    <option value="rag">Q&A</option>
+                                    <option value="summarize">Summarize</option>
+                                    <option value="citation">Citations</option>
+                                    <option value="question">Chat</option>
+                                </Select>
+                            </div>
+                        )}
+
+                        <Button variant="success" size="lg" onClick={handleSearch} disabled={loading} className="w-full lg:w-auto h-[34px] flex items-center justify-center">
+                            {loading ? 'Processing...' : 'Search'}
+                        </Button>
+                    </div>
                 </div>
+                
+                {/* Enhanced Query Display */}
+                {enhancedQuery && (
+                    <div className="bg-black text-[#00FF00] font-mono text-sm p-2 border-2 border-[#808080] bevel-inset">
+                        <span className="font-bold mr-2">root@system:~$</span>
+                        <span className="opacity-70">Enhanced Query: </span>
+                        "{enhancedQuery}"
+                    </div>
+                )}
 
             </div>
         </Card>
@@ -206,8 +234,8 @@ function App() {
                                 <span className="bg-retro-secondary text-white text-xs px-1 font-bold animate-pulse-glow">NEW!</span>
                                 <h3 className="m-0 text-lg">Generated Response</h3>
                              </div>
-                             <div className="whitespace-pre-wrap font-medium leading-relaxed">
-                                {ragAnswer}
+                             <div className="font-medium leading-relaxed">
+                                <ReactMarkdown>{ragAnswer}</ReactMarkdown>
                              </div>
                         </div>
                         <div className="mt-4 flex justify-end">
@@ -254,7 +282,7 @@ function App() {
             </div>
 
             <p className="text-xs">
-                Copyright © 1997-2026 RAG Search Engine Corp. All rights reserved.<br/>
+                Copyright © 1997-2026 MovieSearch 5000 Corp. All rights reserved.<br/>
                 Optimized for 800x600 resolution.
             </p>
             

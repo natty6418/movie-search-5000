@@ -1,68 +1,69 @@
-"""Utilities for talking to a locally hosted LLM (e.g., Ollama)."""
+"""Utilities for talking to an LLM via Hugging Face Inference API."""
 
 from __future__ import annotations
 
 import json
 import os
-import urllib.error
-import urllib.request
+import re
 
 from dotenv import load_dotenv
 from colorama import Fore, Style
+from huggingface_hub import InferenceClient
 
 load_dotenv()
 
-LOCAL_LLM_MODEL = os.environ.get("LOCAL_LLM_MODEL", "qwen2.5:7b-instruct")
-LOCAL_LLM_BASE_URL = os.environ.get("LOCAL_LLM_URL", "http://localhost:11434")
-LOCAL_LLM_ENDPOINT = os.environ.get(
-    "LOCAL_LLM_ENDPOINT", f"{LOCAL_LLM_BASE_URL.rstrip('/')}/api/generate"
-)
-
+# Default to the requested model, but allow override via env var
+LLM_MODEL = os.environ.get("LLM_MODEL", "meta-llama/Llama-4-Scout-17B-16E-Instruct")
+HF_TOKEN = os.environ.get("HF_TOKEN")
 
 class LocalLLMError(RuntimeError):
-    """Raised when the local LLM cannot be reached or returns invalid data."""
+    """Raised when the LLM cannot be reached or returns invalid data."""
 
-
-def _call_local_llm(prompt: str) -> str:
-    payload = {
-        "model": LOCAL_LLM_MODEL,
-        "prompt": prompt,
-        "stream": False,
-    }
-    data = json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(
-        LOCAL_LLM_ENDPOINT,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+def _call_local_llm(prompt: str, system_prompt: str = None, json_mode: bool = False) -> str:
+    """
+    Calls the Hugging Face Inference API using the standard Chat Completion format.
+    """
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            body = response.read().decode("utf-8")
-    except urllib.error.URLError as exc:  # noqa: PERF203 - clarity over micro-ops
+        client = InferenceClient(token=HF_TOKEN)
+        
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        # Set specific parameters for the generation
+        response_format = {"type": "json_object"} if json_mode else None
+        
+        response = client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=messages,
+            max_tokens=1024,
+            temperature=0.7,
+            response_format=response_format
+        )
+        
+        content = response.choices[0].message.content
+        if not content:
+             raise LocalLLMError("LLM response payload was empty.")
+        
+        return content.strip()
+
+    except Exception as exc:
         raise LocalLLMError(
-            "Could not reach the local LLM endpoint. "
-            "Ensure Ollama (or your chosen server) is running and the model is available."
+            f"Error calling Hugging Face Inference API for model {LLM_MODEL}: {exc}"
         ) from exc
-    try:
-        parsed = json.loads(body)
-    except json.JSONDecodeError as exc:  # noqa: B904 - preserve context for callers
-        raise LocalLLMError("Local LLM returned invalid JSON.") from exc
 
-    response_text = parsed.get("response")
-    if not response_text:
-        raise LocalLLMError("Local LLM response payload was empty.")
-    return response_text.strip()
 
 
 def enhance_query(query: str) -> str:
+    system = "You are a helpful assistant that fixes spelling errors for MovieSearch 5000™."
     prompt = f"""Fix any spelling errors in this movie search query.
 Only correct obvious typos. Don't change correctly spelled words.
 Query: "{query}"
 If no errors, return the original query.
 Corrected:"""
     try:
-        response = _call_local_llm(prompt)
+        response = _call_local_llm(prompt, system_prompt=system)
     except LocalLLMError as exc:
         print(f"Local LLM enhancement failed ({exc}). Using the original query.")
         return query
@@ -72,9 +73,8 @@ Corrected:"""
 
 
 def rewrite_query(query: str) -> str:
+    system = "You are an expert movie search query rewriter for MovieSearch 5000™."
     prompt = f"""
-You are an expert movie search query rewriter.
-
 Your task is to convert a natural-language movie search query into a precise, database-friendly search query that captures the user’s intent.
 
 Rules:
@@ -100,7 +100,7 @@ Original query:
 
 Rewritten query:"""
     try:
-        response = _call_local_llm(prompt)
+        response = _call_local_llm(prompt, system_prompt=system)
     except LocalLLMError as exc:
         print(f"Local LLM enhancement failed ({exc}). Using the original query.")
         return query
@@ -109,6 +109,7 @@ Rewritten query:"""
 
 
 def expand_query(query: str) -> str:
+    system = "You are a movie search assistant for MovieSearch 5000™."
     prompt = f"""Expand this movie search query with related terms.
 
 Add synonyms and related concepts that might appear in movie descriptions.
@@ -126,7 +127,7 @@ Examples:
 Query: "{query}"
 """
     try:
-        response = _call_local_llm(prompt)
+        response = _call_local_llm(prompt, system_prompt=system)
     except LocalLLMError as exc:
         print(f"Local LLM enhancement failed ({exc}). Using the original query.")
         return query
@@ -135,7 +136,7 @@ Query: "{query}"
 
 
 def rank_results(query: str, doc: dict) -> str:
-
+    system = "You are a movie relevance rater for MovieSearch 5000™."
     prompt = f"""Rate how well this movie matches the search query.
     
     Query: "{query}"
@@ -152,7 +153,7 @@ def rank_results(query: str, doc: dict) -> str:
     Score:"""
 
     try:
-        response = _call_local_llm(prompt)
+        response = _call_local_llm(prompt, system_prompt=system)
     except LocalLLMError as exc:
         print(f"Local LLM enhancement failed ({exc}). Using the original query.")
         return query
@@ -171,7 +172,8 @@ def batch_rank_results(query: str, docs: list[dict]) -> list[str]:
         }
         for d in docs
     ]
-
+    
+    system = "You are a movie ranking system for MovieSearch 5000™."
     prompt = f"""
 You are ranking movies by relevance to a search query.
 
@@ -191,11 +193,12 @@ Output format example:
 [1771, 12, 34]
 """.strip()
 
-    response = _call_local_llm(prompt).strip()
+    response = _call_local_llm(prompt, system_prompt=system, json_mode=True).strip()
     return json.loads(response)
 
 
 def judge_relevance(query: str, formatted_results: list[str]) -> list[str]:
+    system = "You are a relevance judge for MovieSearch 5000™."
     prompt = f"""Rate how relevant each result is to this query on a 0-3 scale:
 
 Query: "{query}"
@@ -215,50 +218,63 @@ Return ONLY the scores in the same order you were given the documents. Return a 
 
 [2, 0, 3, 2, 0, 1]"""
 
-    response = _call_local_llm(prompt).strip()
+    response = _call_local_llm(prompt, system_prompt=system, json_mode=True).strip()
     return json.loads(response)
 
 
 def rag_answer(query: str, docs: list[dict[str, str]]) -> str:
 
     print(Fore.YELLOW + "Query: " + query + Style.RESET_ALL)
-    prompt = f"""Answer the question or provide information based on the provided documents. This should be tailored to Hoopla users. Hoopla is a movie streaming service.
+    system = "You are a helpful assistant for MovieSearch 5000™, a movie streaming service."
     
-    Query: {query}
+    context = _format_docs_for_prompt(docs)
     
-    Documents:
-    {json.dumps(docs, ensure_ascii=False)}
+    prompt = f"""You are a movie recommendation assistant.
     
-    Provide a comprehensive answer that addresses the query:"""
+    User Query: "{query}"
+    
+    Provided Movies (Context):
+    {context}
+    
+    Task:
+    - Analyze the provided movies.
+    - Identify which ones are most relevant to the User Query.
+    - Recommend them to the user with a brief explanation of why they fit.
+    - If a movie in the list is NOT relevant (e.g. wrong actor, wrong genre), ignore it.
+    - If NO movies are relevant, politely say so.
+    
+    Response:"""
 
-    response = _call_local_llm(prompt).strip()
+    response = _call_local_llm(prompt, system_prompt=system).strip()
     return response
 
 
 def summarize(query: str, docs: list[dict[str, str]]) -> str:
+    system = "You are a helpful assistant for MovieSearch 5000™, a movie streaming service."
+    
+    context = _format_docs_for_prompt(docs)
+    
     prompt = f"""
 Provide information useful to this query by synthesizing information from multiple search results in detail.
 The goal is to provide comprehensive information so that users know what their options are.
 Your response should be information-dense and concise, with several key pieces of information about the genre, plot, etc. of each movie.
-This should be tailored to Hoopla users. Hoopla is a movie streaming service.
+This should be tailored to MovieSearch 5000™ users.
+
 Query: {query}
 Search Results:
-{json.dumps(docs, ensure_ascii=False)}
+{context}
 Provide a comprehensive 3–4 sentence answer that combines information from multiple sources:
 """
 
-    response = _call_local_llm(prompt).strip()
+    response = _call_local_llm(prompt, system_prompt=system).strip()
     return response
+
 def _format_docs_for_prompt(docs: list[dict[str, str]]) -> str:
     lines = []
     for i, d in enumerate(docs, start=1):
-        doc_id = d.get("id", "")
-        title = d.get("title", "")
-        text = d.get('description', "")  # adapt to your schema
-        lines.append(
-            f"[{i}] id={doc_id!r} title={title!r}\n"
-            f"    text={text}\n"
-        )
+        title = d.get("title", "Unknown Title")
+        text = d.get('description', "")
+        lines.append(f"Movie {i}: {title}\nDescription: {text}\n")
     return "\n".join(lines)
 import re
 
@@ -276,8 +292,9 @@ def generate_citations(query: str, docs: list[dict[str, str]]) -> str:
 
     docs_block = _format_docs_for_prompt(docs)
     n = len(docs)
-
-    prompt = f"""You are Hoopla's movie helper. Answer using ONLY the documents below.
+    
+    system = "You are MovieSearch 5000™'s movie helper."
+    prompt = f"""Answer using ONLY the documents below.
 
 Query: {query}
 
@@ -294,7 +311,7 @@ Rules:
 
 Answer:"""
 
-    response = _call_local_llm(prompt).strip()
+    response = _call_local_llm(prompt, system_prompt=system).strip()
     response = _strip_invalid_citations(response, n)
     return response
 
@@ -302,9 +319,9 @@ Answer:"""
 def question_answering(question: str, docs: list[dict[str, str]]) -> str:
     print(Fore.MAGENTA + "Question: " + question + Style.RESET_ALL)
     context = _format_docs_for_prompt(docs)
-    prompt = f"""Answer the user's question based on the provided movies that are available on Hoopla.
-
-This should be tailored to Hoopla users. Hoopla is a movie streaming service. 
+    
+    system = "You are a helpful assistant for MovieSearch 5000™. You are casual and conversational."
+    prompt = f"""Answer the user's question based on the provided movies that are available on MovieSearch 5000™.
 
 Documents:
 {context}
@@ -320,5 +337,5 @@ Instructions:
 Question: {question}
 
 Answer:"""
-    response = _call_local_llm(prompt).strip()
+    response = _call_local_llm(prompt, system_prompt=system).strip()
     return response

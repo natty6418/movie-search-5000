@@ -127,7 +127,7 @@ def main():
                 print("No movies found in the dataset.")
                 return
             if model.embeddings is None:
-                model.load_or_create_embeddigns(movies_list)
+                model.load_or_create_embeddings(movies_list)
             results = model.search(args.query, args.limit)
             for idx, result in enumerate(results):
                 print(

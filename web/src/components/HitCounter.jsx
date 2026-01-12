@@ -1,16 +1,11 @@
 import { useState, useEffect } from 'react';
+import { incrementVisit } from '../api';
 
 export function HitCounter() {
-    const [count, setCount] = useState(1234);
+    const [count, setCount] = useState(0);
 
     useEffect(() => {
-        // Fake increment
-        const interval = setInterval(() => {
-            if (Math.random() > 0.7) {
-                setCount(c => c + 1);
-            }
-        }, 5000);
-        return () => clearInterval(interval);
+        incrementVisit().then(data => setCount(data.count)).catch(err => console.error("Hit counter failed:", err));
     }, []);
 
     const paddedCount = count.toString().padStart(7, '0');

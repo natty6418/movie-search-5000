@@ -15,7 +15,7 @@ chunk_metadata_path = os.path.join(
     os.path.dirname(__file__), "../../cache/chunk_metadata.json"
 )
 movies_path = os.path.join(os.path.dirname(__file__), "../../data/movies.json")
-MODEL_NAME = "all-MiniLM-L6-v2"
+MODEL_NAME = "sentence-transformers/all-mpnet-base-v2"
 
 
 class SemanticSearch:
@@ -25,7 +25,7 @@ class SemanticSearch:
         self.doc_map = {}
         self.embeddings = None
 
-    def generate_embeddign(self, text: str):
+    def generate_embedding(self, text: str):
         """
         Generate embedding for the given text using the SentenceTransformer model.
 
@@ -55,7 +55,7 @@ class SemanticSearch:
             )
         return self.embeddings
 
-    def load_or_create_embeddigns(self, documents: list[dict[str, str]]):
+    def load_or_create_embeddings(self, documents: list[dict[str, str]]):
 
         self.documents = documents
         docs = []
@@ -81,7 +81,7 @@ class SemanticSearch:
             raise ValueError(
                 "No embeddings loaded. Call `load_or_create_embeddings` first."
             )
-        query_embedding = self.generate_embeddign(query)
+        query_embedding = self.generate_embedding(query)
         similarity_scores = []
 
         for idx, embedding in enumerate(self.embeddings):
@@ -105,7 +105,7 @@ class SemanticSearch:
 
 
 class ChunkedSemanticSearch(SemanticSearch):
-    def __init__(self, model_name="all-MiniLM-L6-v2") -> None:
+    def __init__(self, model_name=MODEL_NAME) -> None:
         super().__init__(model_name)
         self.chunk_embeddings = None
         self.chunk_metadata = None
@@ -119,10 +119,11 @@ class ChunkedSemanticSearch(SemanticSearch):
         for idx, doc in enumerate(documents):
             self.doc_map[doc["id"]] = doc
             docs.append(doc["title"] + " " + doc["description"])
-            if len(doc["description"].strip() != 0):
+            if len(doc["description"].strip()) != 0:
                 chunks_per_doc = semantic_chunk(doc["description"], 4, 1)
                 for chunk_idx, chunk in enumerate(chunks_per_doc):
-                    chunks.append(chunk)
+                    # Prepend title to chunk for better context
+                    chunks.append(f"{doc['title']}: {chunk}")
                     chunks_meta.append({
                         "movie_idx": idx,
                         "chunk_idx": chunk_idx,
@@ -150,7 +151,8 @@ class ChunkedSemanticSearch(SemanticSearch):
             if len(doc["description"].strip()) != 0:
                 chunks_per_doc = semantic_chunk(doc["description"], 4, 1)
                 for chunk_idx, chunk in enumerate(chunks_per_doc):
-                    chunks.append(chunk)
+                    # Prepend title to chunk for better context
+                    chunks.append(f"{doc['title']}: {chunk}")
                     chunks_meta.append({
                         "movie_idx": idx,
                         "chunk_idx": chunk_idx,
@@ -176,7 +178,7 @@ class ChunkedSemanticSearch(SemanticSearch):
         return self.chunk_embeddings
 
     def search_chunks(self, query: str, limit: int = 10) -> list[dict]:
-        query_embedding = self.generate_embeddign(query)
+        query_embedding = self.generate_embedding(query)
         chunk_score = []
         if self.chunk_embeddings is None or self.chunk_metadata is None:
             raise ValueError(
@@ -202,7 +204,7 @@ class ChunkedSemanticSearch(SemanticSearch):
             lambda movie: {
                 "id": self.documents[movie[0]]["id"],
                 "title": self.documents[movie[0]]["title"],
-                "description": self.documents[movie[0]]["description"][:100] + "...",
+                "description": self.documents[movie[0]]["description"],
                 "score": round(movie[1], 4),
                 "metadata": self.documents[movie[0]].get("metadata", {}),
             },
@@ -252,7 +254,7 @@ def verify_model():
 
 def embed_text(text: str) -> None:
     model = SemanticSearch()
-    embedding = model.generate_embeddign(text)
+    embedding = model.generate_embedding(text)
     print(f"Text: {text}")
     print(f"First 3 dimensions: {embedding[:3]}")
     print(f"Dimensions: {embedding.shape[0]}")
@@ -262,7 +264,7 @@ def verify_embedding():
     with open(movies_path, "r", encoding="utf-8") as f:
         movies_list = json.load(f)["movies"]
     model = SemanticSearch()
-    embeddings = model.load_or_create_embeddigns(movies_list)
+    embeddings = model.load_or_create_embeddings(movies_list)
 
     print(f"Number of docs:   {len(movies_list)}")
     print(
@@ -272,7 +274,7 @@ def verify_embedding():
 
 def embed_query_text(query):
     model = SemanticSearch()
-    embedding = model.generate_embeddign(query)
+    embedding = model.generate_embedding(query)
     print(f"Query: {query}")
     print(f"First 5 dimensions: {embedding[:5]}")
     print(f"Shape: {embedding.shape}")

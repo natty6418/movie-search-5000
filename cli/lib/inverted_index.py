@@ -21,23 +21,33 @@ def tokenize(text):
     words = text.lower().translate(table).split()
     return [stemmer.stem(word) for word in words if word not in stop_words]
 
+def tokenize_bigrams(text):
+    words = tokenize(text)
+    if len(words) < 2:
+        return []
+    return [f"{words[i]}_{words[i+1]}" for i in range(len(words) - 1)]
+
 
 class InvertedIndex:
-    def __init__(self) -> None:
+    def __init__(self, index_name="index") -> None:
         self.index = {}  # maps a word (token) to a set of movie ids it belongs to
         self.docmap = {}  # maps a movieId to it's title
         self.term_frequencies = {}  # maps document ids (movie object ids) to a counter for the number of tokens included
         self.doc_lengths = {}  # maps document ids to their lengths
+        self.index_name = index_name
 
         self.movies_path = os.path.join(
             os.path.dirname(__file__), "../../data/movies.json"
         )
         self.index_path = os.path.join(
-            os.path.dirname(__file__), "../../cache/index.pkl"
+            os.path.dirname(__file__), f"../../cache/{index_name}.pkl"
         )
 
+    def tokenize_strategy(self, text):
+        return tokenize(text)
+
     def __add_document(self, doc_id, text):
-        for word in tokenize(text):
+        for word in self.tokenize_strategy(text):
             self.index.setdefault(word, set()).add(doc_id)
             self.term_frequencies.setdefault(doc_id, Counter())[word] += 1
             self.doc_lengths[doc_id] = self.doc_lengths.get(doc_id, 0) + 1
@@ -62,9 +72,7 @@ class InvertedIndex:
             self.docmap[movie["id"]] = movie
 
     def get_tf(self, doc_id, term):
-        tokenized_term = tokenize(term)
-        if len(tokenized_term) > 1:
-            raise ValueError(f"Term ({term}) must be a single word")
+        tokenized_term = self.tokenize_strategy(term)
         if len(tokenized_term) == 0:
             return 0
         token = tokenized_term[0]
@@ -90,14 +98,13 @@ class InvertedIndex:
         float: The BM25 IDF value.
 
         """
-        tokenized_term = tokenize(term)
-        if len(tokenized_term) > 1:
-            raise ValueError("Term must be a single word")
+        tokenized_term = self.tokenize_strategy(term)
         if len(tokenized_term) == 0:
             return 0.0
         token = tokenized_term[0]
         df = len(self.get_documents(token))
         N = len(self.docmap)
+        if N == 0: return 0.0
         bm25_idf = math.log((N - df + 0.5) / (df + 0.5) + 1)
         return bm25_idf
 
@@ -151,11 +158,18 @@ class InvertedIndex:
         Returns:
             list: List of tuples containing document and its BM25 score.
         """
-        tokenized_query = tokenize(query)
+        tokenized_query = self.tokenize_strategy(query)
         scores = {}
         for term in tokenized_query:
-            for doc_id in self.get_documents(term):
-                scores[doc_id] = scores.get(doc_id, 0) + self.bm25(doc_id, term)
+            docs = self.get_documents(term)
+            if not docs:
+                continue
+                
+            idf = self.get_bm25_idf(term)
+            for doc_id in docs:
+                tf = self.get_bm25_tf(doc_id, term)
+                scores[doc_id] = scores.get(doc_id, 0) + (tf * idf)
+                
         ranked_docs = list(
             map(
                 lambda x: (self.docmap[x[0]], x[1]),
@@ -166,24 +180,37 @@ class InvertedIndex:
 
     def save(self):
         os.makedirs("cache", exist_ok=True)
-        with open("cache/index.pkl", "wb") as f:
+        base = os.path.dirname(self.index_path)
+        with open(self.index_path, "wb") as f:
             pickle.dump(self.index, f)
-        with open("cache/docmap.pkl", "wb") as f:
+        with open(os.path.join(base, f"{self.index_name}_docmap.pkl"), "wb") as f:
             pickle.dump(self.docmap, f)
-        with open("cache/term_frequencies.pkl", "wb") as f:
+        with open(os.path.join(base, f"{self.index_name}_term_frequencies.pkl"), "wb") as f:
             pickle.dump(self.term_frequencies, f)
-        with open("cache/doc_lengths.pkl", "wb") as f:
+        with open(os.path.join(base, f"{self.index_name}_doc_lengths.pkl"), "wb") as f:
             pickle.dump(self.doc_lengths, f)
 
     def load(self):
-        with open("cache/index.pkl", "rb") as f:
+        base = os.path.dirname(self.index_path)
+        with open(self.index_path, "rb") as f:
             self.index = pickle.load(f)
-        with open("cache/docmap.pkl", "rb") as f:
+        with open(os.path.join(base, f"{self.index_name}_docmap.pkl"), "rb") as f:
             self.docmap = pickle.load(f)
-        with open("cache/term_frequencies.pkl", "rb") as f:
+        with open(os.path.join(base, f"{self.index_name}_term_frequencies.pkl"), "rb") as f:
             self.term_frequencies = pickle.load(f)
-        with open("cache/doc_lengths.pkl", "rb") as f:
+        with open(os.path.join(base, f"{self.index_name}_doc_lengths.pkl"), "rb") as f:
             self.doc_lengths = pickle.load(f)
+
+
+class BigramInvertedIndex(InvertedIndex):
+    def __init__(self) -> None:
+        super().__init__(index_name="index_bigrams")
+        
+    def tokenize_strategy(self, text):
+        # When looking up a single term (already tokenized as a bigram)
+        if "_" in text and " " not in text:
+            return [text]
+        return tokenize_bigrams(text)
 
 
 def bm25_idf_command(term: str) -> float:
@@ -195,7 +222,6 @@ def bm25_idf_command(term: str) -> float:
     Returns:
         float: The BM25 IDF value.
     """
-
     inverted_index = InvertedIndex()
     inverted_index.load()
     return inverted_index.get_bm25_idf(term)
@@ -230,3 +256,12 @@ def bm25search_command(query: str, limit: int = 10) -> list:
     inverted_index = InvertedIndex()
     inverted_index.load()
     return inverted_index.bm25_search(query, limit)
+
+def bm25_search_bigrams(query: str, limit: int = 10) -> list:
+    idx = BigramInvertedIndex()
+    if not os.path.exists(idx.index_path):
+        idx.build()
+        idx.save()
+    else:
+        idx.load()
+    return idx.bm25_search(query, limit)
