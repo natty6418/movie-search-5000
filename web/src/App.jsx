@@ -6,13 +6,13 @@ import { Input, Select } from './components/Input';
 import { RetroMarquee } from './components/Marquee';
 import { HitCounter } from './components/HitCounter';
 import { SearchResult } from './components/SearchResult';
-import { searchKeywords, searchSemantic, searchHybrid, performRag } from './api';
-import { Search, Zap, Cpu, MessageSquare, Terminal, HelpCircle } from 'lucide-react';
+import { searchKeywords, searchSemantic, searchHybrid, performRag, performAgentAction } from './api';
+import { Search, Zap, Cpu, MessageSquare, Terminal, HelpCircle, Bot } from 'lucide-react';
 import clsx from 'clsx';
 
 function App() {
   const [query, setQuery] = useState('');
-  const [mode, setMode] = useState('keyword'); // keyword, semantic, hybrid, rag
+  const [mode, setMode] = useState('keyword'); // keyword, semantic, hybrid, rag, agent
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [ragAnswer, setRagAnswer] = useState(null);
@@ -67,6 +67,10 @@ function App() {
             setRagAnswer(data.answer);
             setResults(data.docs.map(d => ({ ...d, score: 'N/A' })));
         }
+      } else if (mode === 'agent') {
+        const data = await performAgentAction(query);
+        setRagAnswer(data.answer);
+        setResults([]); // Agent doesn't return raw results in this simplified view
       }
     } catch (err) {
       console.error(err);
@@ -118,6 +122,7 @@ function App() {
                         { id: 'semantic', label: 'Semantic AI', icon: Zap },
                         { id: 'hybrid', label: 'Hybrid Fusion', icon: Cpu },
                         { id: 'rag', label: 'RAG Assistant', icon: MessageSquare },
+                        { id: 'agent', label: 'Auto Agent', icon: Bot },
                     ].map(tab => (
                         <Button 
                             key={tab.id}
@@ -139,7 +144,7 @@ function App() {
                             value={query} 
                             onChange={(e) => setQuery(e.target.value)}
                             onKeyDown={handleKeyDown}
-                            placeholder={mode === 'rag' ? "Ask a question..." : "Enter keywords..."}
+                            placeholder={mode === 'rag' || mode === 'agent' ? "Ask a question..." : "Enter keywords..."}
                             autoFocus
                         />
                     </div>
@@ -155,7 +160,7 @@ function App() {
                             </Select>
                         </div>
 
-                        {mode !== 'semantic' && (
+                        {mode !== 'semantic' && mode !== 'agent' && (
                             <div className="space-y-2 flex-1 lg:flex-none">
                                 <label className="font-bold uppercase text-xs block">Keywords</label>
                                 <Select value={bm25Type} onChange={(e) => setBm25Type(e.target.value)} className="w-full lg:w-28 text-sm">

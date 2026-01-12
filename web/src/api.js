@@ -29,6 +29,11 @@ export const performRag = async (query, mode = 'rag', limit = 5, enhance_mode = 
   return response.data;
 };
 
+export const performAgentAction = async (query, chat_history = []) => {
+    const response = await api.post('/agent', { query, chat_history });
+    return response.data;
+};
+
 export const incrementVisit = async () => {
     const response = await api.post('/visit');
     return response.data;

@@ -12,6 +12,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from cli.lib.hybrid_search import HybridSearch, cross_encoder_rerank_results
 from cli.lib.local_llm import rag_answer, summarize, generate_citations, question_answering
+from cli.lib.agent import build_graph
 
 app = FastAPI(title="RAG Search Engine API")
 
@@ -42,9 +43,14 @@ class RAGQuery(BaseModel):
     enhance_mode: Literal["none", "fix_spelling", "rewrite", "expand"] = "none"
     bm25_type: Literal["unigram", "bigram", "combined"] = "combined"
 
+class AgentQuery(BaseModel):
+    query: str
+    chat_history: List[Dict[str, str]] = [] # Optional history
+
 # Global instances
 MOVIES_PATH = os.path.join(os.path.dirname(__file__), "../data/movies.json")
 HYBRID_SEARCH_ENGINE = None
+AGENT_GRAPH = None
 VISITOR_COUNT = 0
 VISITOR_FILE = os.path.join(os.path.dirname(__file__), "visitors.txt")
 
@@ -64,6 +70,13 @@ def get_engine():
             movies_list = json.load(f)["movies"]
         HYBRID_SEARCH_ENGINE = HybridSearch(movies_list)
     return HYBRID_SEARCH_ENGINE
+
+def get_agent():
+    global AGENT_GRAPH
+    if AGENT_GRAPH is None:
+        engine = get_engine()
+        AGENT_GRAPH = build_graph(engine)
+    return AGENT_GRAPH
 
 def make_serializable(obj):
     if isinstance(obj, np.floating):
@@ -98,13 +111,38 @@ def startup_event():
     # Pre-load the engine on startup
     try:
         get_engine()
-        print("Search engine initialized successfully.")
+        get_agent() # Pre-load agent
+        print("Search engine and Agent initialized successfully.")
     except Exception as e:
         print(f"Failed to initialize search engine: {e}")
 
 @app.get("/")
 def health_check():
     return {"status": "ok", "message": "RAG Search Engine API is running"}
+
+@app.post("/agent")
+async def agent_endpoint(request: AgentQuery):
+    graph = get_agent()
+    
+    # Construct initial state
+    messages = request.chat_history.copy()
+    messages.append({"role": "user", "content": request.query})
+    
+    inputs = {"messages": messages}
+    
+    # Run the graph
+    # We use invoke for a blocking call. 
+    # For streaming, we'd need a different setup (Server Sent Events), 
+    # but for now we'll return the final response.
+    try:
+        final_state = await graph.ainvoke(inputs)
+        last_message = final_state["messages"][-1]
+        return {
+            "answer": last_message["content"],
+            "messages": final_state["messages"] # Return full trace for debugging/UI
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/visit")
 def visit():

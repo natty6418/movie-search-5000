@@ -156,6 +156,7 @@ web/*.log
 # Project specific
 data/
 cache/
+docs/
 .idea/
 .vscode/
 .DS_Store
