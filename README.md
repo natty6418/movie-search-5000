@@ -1,4 +1,4 @@
-# RAG Search Engine 🎬
+# Movie Search 5000 🎬
 
 A comprehensive Retrieval-Augmented Generation (RAG) search engine for movies with a retro-themed web interface. This project demonstrates various search techniques ranging from traditional keyword search to modern agentic RAG systems.
 
