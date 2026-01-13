@@ -374,7 +374,7 @@ Return Answer
 └──────┬──────┘
        ▼
 ┌─────────────────┐
-│  Agent (Brain)  │  ← Gemini LLM
+│  Agent (Brain)  │  
 │  - Thinks       │
 │  - Decides      │
 └────────┬────────┘

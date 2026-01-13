@@ -154,7 +154,6 @@ web/dist-ssr/
 web/*.log
 
 # Project specific
-data/
 cache/
 docs/
 .idea/

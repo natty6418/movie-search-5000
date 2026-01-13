@@ -5,7 +5,10 @@ import numpy as np
 from typing import List, Optional, Literal, Dict, Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+import asyncio
+from collections import defaultdict
 
 # Add project root to sys.path to allow importing cli.lib
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -46,6 +49,7 @@ class RAGQuery(BaseModel):
 class AgentQuery(BaseModel):
     query: str
     chat_history: List[Dict[str, str]] = [] # Optional history
+    session_id: Optional[str] = None  # For tracking conversations
 
 # Global instances
 MOVIES_PATH = os.path.join(os.path.dirname(__file__), "../data/movies.json")
@@ -53,6 +57,7 @@ HYBRID_SEARCH_ENGINE = None
 AGENT_GRAPH = None
 VISITOR_COUNT = 0
 VISITOR_FILE = os.path.join(os.path.dirname(__file__), "visitors.txt")
+CHAT_SESSIONS = defaultdict(list)  # session_id -> messages list
 
 if os.path.exists(VISITOR_FILE):
     with open(VISITOR_FILE, "r") as f:
@@ -125,13 +130,14 @@ async def agent_endpoint(request: AgentQuery):
     graph = get_agent()
 
     # Construct initial state for the new agent structure
-    # The new agent expects: query, messages, retrieved_docs, limit, action
+    # The new agent expects: query, messages, retrieved_docs, limit, action, needs_search
     initial_state = {
         "query": request.query,
         "messages": request.chat_history.copy(),  # Preserve chat history
         "retrieved_docs": [],
         "limit": 5,
-        "action": ""
+        "action": "",
+        "needs_search": True  # Will be determined by classify_query_type node
     }
 
     try:
@@ -170,6 +176,133 @@ async def agent_endpoint(request: AgentQuery):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/agent/stream")
+async def agent_stream_endpoint(request: AgentQuery):
+    """Stream agent execution states in real-time using Server-Sent Events."""
+    graph = get_agent()
+    
+    # Get or create session
+    session_id = request.session_id or f"session_{id(request)}"
+    chat_history = CHAT_SESSIONS[session_id] if request.session_id else request.chat_history.copy()
+    
+    # Construct initial state
+    initial_state = {
+        "query": request.query,
+        "messages": chat_history,
+        "retrieved_docs": [],
+        "limit": 5,
+        "action": "",
+        "needs_search": True  # Will be determined by classify_query_type node
+    }
+    
+    async def event_generator():
+        try:
+            # Accumulate state from stream events
+            accumulated_state = initial_state.copy()
+            
+            # Stream the graph execution
+            for event in graph.stream(initial_state):
+                # event is a dict with node name as key
+                node_name = list(event.keys())[0] if event else None
+                node_data = event.get(node_name, {}) if node_name else {}
+                
+                # Update accumulated state with node output
+                if node_data:
+                    accumulated_state.update(node_data)
+                
+                # Determine status message based on node
+                status_message = ""
+                if node_name == "classify_query_type":
+                    status_message = "🧠 Understanding your question..."
+                elif node_name == "process_query":
+                    status_message = "🔍 Processing your query..."
+                elif node_name == "search_movies":
+                    status_message = "🎬 Searching movie database..."
+                elif node_name == "classify":
+                    status_message = "🤔 Analyzing results..."
+                elif node_name == "draft_response":
+                    status_message = "✍️ Drafting response..."
+                elif node_name == "direct_response":
+                    status_message = "💬 Preparing response..."
+                
+                # Send status update
+                if status_message:
+                    yield f"data: {json.dumps({'type': 'status', 'message': status_message, 'node': node_name})}\n\n"
+                
+                # Send partial state data
+                if node_data:
+                    # Extract useful info to send
+                    update_data = {
+                        "type": "update",
+                        "node": node_name,
+                    }
+                    
+                    # Add specific data based on node
+                    if node_name == "search_movies" and "retrieved_docs" in node_data:
+                        docs = node_data["retrieved_docs"]
+                        update_data["retrieved_count"] = len(docs)
+                        update_data["docs"] = [{"title": d.get("title", ""), "description": d.get("description", "")[:100]} for d in docs[:3]]
+                    
+                    if node_name == "classify" and "action" in node_data:
+                        update_data["action"] = node_data["action"]
+                    
+                    if node_name == "draft_response" and "messages" in node_data:
+                        messages = node_data["messages"]
+                        for msg in reversed(messages):
+                            if msg.get("role") == "assistant" and not msg.get("content", "").startswith("Enhanced query:"):
+                                update_data["answer"] = msg.get("content", "")
+                                break
+                    
+                    yield f"data: {json.dumps(update_data)}\n\n"
+                
+                # Small delay to prevent overwhelming the client
+                await asyncio.sleep(0.1)
+            
+            # Use accumulated state from stream (no need to invoke again)
+            final_state = accumulated_state
+            
+            # Extract final answer
+            messages = final_state.get("messages", [])
+            final_answer = None
+            for msg in reversed(messages):
+                if msg.get("role") == "assistant" and not msg.get("content", "").startswith("Enhanced query:"):
+                    final_answer = msg.get("content", "")
+                    break
+            
+            if not final_answer:
+                final_answer = "No response generated."
+            
+            # Format docs
+            retrieved_docs = final_state.get("retrieved_docs", [])
+            formatted_docs = [{"title": d.get("title", ""), "description": d.get("description", "")} for d in retrieved_docs]
+            
+            # Update session
+            CHAT_SESSIONS[session_id] = messages
+            
+            # Send final result
+            final_data = {
+                "type": "complete",
+                "answer": final_answer,
+                "docs": formatted_docs,
+                "query_used": final_state.get("query", request.query),
+                "session_id": session_id
+            }
+            yield f"data: {json.dumps(final_data)}\n\n"
+            
+        except Exception as e:
+            error_data = {"type": "error", "message": str(e)}
+            yield f"data: {json.dumps(error_data)}\n\n"
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 @app.post("/visit")
 def visit():

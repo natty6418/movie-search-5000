@@ -1,22 +1,40 @@
 # RAG Search Engine 🎬
 
-A comprehensive Retrieval-Augmented Generation (RAG) search engine for movies. This project demonstrates various search techniques ranging from traditional keyword search to modern semantic search and RAG pipelines.
+A comprehensive Retrieval-Augmented Generation (RAG) search engine for movies with a retro-themed web interface. This project demonstrates various search techniques ranging from traditional keyword search to modern agentic RAG systems.
 
 ## 🚀 Features
 
-*   **Keyword Search:** Uses BM25 and TF-IDF algorithms for exact matching and term frequency analysis.
-*   **Semantic Search:** Utilizes local embeddings (`sentence-transformers`) and vector search to find conceptually similar movies. Supports chunking for better granularity.
-*   **Hybrid Search:** Combines keyword and semantic search results using Weighted Sum or Reciprocal Rank Fusion (RRF) for optimal retrieval.
-*   **Augmented Generation (RAG):** Uses a local LLM (via Ollama) to answer questions, summarize movie details, and generate citations based on search results.
+### Search Modes
+
+*   **Keyword Search:** Uses BM25 (unigram, bigram, or combined) and TF-IDF algorithms for exact matching and term frequency analysis.
+*   **Semantic Search:** Utilizes local embeddings (`sentence-transformers`) and vector search with chunking to find conceptually similar movies.
+*   **Hybrid Search:** Combines keyword and semantic search results using Weighted Sum or Reciprocal Rank Fusion (RRF), followed by Cross-Encoder reranking for optimal retrieval.
+*   **RAG Assistant:** Uses a local LLM (via Ollama) to answer questions, summarize movie details, generate citations, and perform question-answering based on search results.
+*   **Agentic RAG:** Multi-step reasoning agent powered by LangGraph that:
+    - Classifies queries to determine if database search is needed
+    - Enhances queries for better search results
+    - Searches the movie database intelligently
+    - Analyzes results and decides if more searching is needed
+    - Drafts comprehensive responses based on findings
+
+### Additional Features
+
+*   **Query Enhancement:** Automatically improves queries using LLM-based techniques (fix spelling, rewrite, expand).
+*   **Cross-Encoder Reranking:** Uses `cross-encoder/ms-marco-TinyBERT-L2-v2` to rerank results for better relevance.
+*   **Web Interface:** Retro-themed (90s style) React frontend with real-time streaming responses.
+*   **REST API:** FastAPI backend with Server-Sent Events for streaming agent execution.
 *   **Evaluation:** Tools to measure the precision and recall of the search results.
 
 ## 🛠️ Prerequisites
 
 *   **Python:** 3.11 or higher
-*   **Ollama:** For the local LLM integration.
-*   **Package Manager:** `uv` is recommended (lock file provided), but `pip` works too.
+*   **Node.js:** 18 or higher (for the web frontend)
+*   **Ollama:** For the local LLM integration
+*   **Package Manager:** `uv` is recommended (lock file provided), but `pip` works too
 
 ## 📦 Installation
+
+### Backend Setup
 
 1.  **Clone the repository:**
     ```bash
@@ -24,7 +42,7 @@ A comprehensive Retrieval-Augmented Generation (RAG) search engine for movies. T
     cd rag-search-engine
     ```
 
-2.  **Install Dependencies:**
+2.  **Install Python Dependencies:**
     Using `uv` (recommended):
     ```bash
     uv sync
@@ -35,7 +53,7 @@ A comprehensive Retrieval-Augmented Generation (RAG) search engine for movies. T
     ```
 
 3.  **Set up the Local LLM:**
-    Install [Ollama](https://ollama.com/) and pull the default model:
+    Install [Ollama](https://ollama.com/) and pull the required model:
     ```bash
     ollama pull qwen2.5:7b-instruct
     ```
@@ -56,6 +74,14 @@ A comprehensive Retrieval-Augmented Generation (RAG) search engine for movies. T
     }
     ```
     For evaluation, a `golden_dataset.json` in `data/` is also required.
+
+### Frontend Setup
+
+5.  **Install Node.js Dependencies:**
+    ```bash
+    cd web
+    npm install
+    ```
 
 ## 💻 Usage
 

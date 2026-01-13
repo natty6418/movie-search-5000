@@ -6,7 +6,8 @@ import { Input, Select } from './components/Input';
 import { RetroMarquee } from './components/Marquee';
 import { HitCounter } from './components/HitCounter';
 import { SearchResult } from './components/SearchResult';
-import { searchKeywords, searchSemantic, searchHybrid, performRag, performAgentAction } from './api';
+import ChatInterface from './components/ChatInterface';
+import { searchKeywords, searchSemantic, searchHybrid, performRag, streamAgentAction } from './api';
 import { Search, Zap, Cpu, MessageSquare, Terminal, HelpCircle, Bot } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -16,6 +17,11 @@ function App() {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [ragAnswer, setRagAnswer] = useState(null);
+  
+  // Agent chat state
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatStatus, setChatStatus] = useState('');
+  const [sessionId, setSessionId] = useState(`session_${Date.now()}`);
   
   // New state for enhanced query display
   const [enhancedQuery, setEnhancedQuery] = useState(null);
@@ -63,11 +69,8 @@ function App() {
             setRagAnswer(data.answer);
             setResults(data.docs.map(d => ({ ...d, score: 'N/A' })));
         }
-      } else if (mode === 'agent') {
-        const data = await performAgentAction(query);
-        setRagAnswer(data.answer);
-        setResults([]); // Agent doesn't return raw results in this simplified view
       }
+      // Agent mode is now handled by chat interface, not handleSearch
     } catch (err) {
       console.error(err);
       alert("Error performing search! Check console.");
@@ -77,8 +80,56 @@ function App() {
   };
 
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter') handleSearch();
+    if (e.key === 'Enter' && mode !== 'agent') handleSearch();
   }
+
+  const handleChatMessage = (message) => {
+    // Add user message to chat
+    setChatMessages(prev => [...prev, { role: 'user', content: message }]);
+    setLoading(true);
+    setChatStatus('');
+    
+    // Stream agent response
+    streamAgentAction(
+      message,
+      sessionId,
+      // onStatus
+      (statusMsg) => {
+        setChatStatus(statusMsg);
+      },
+      // onUpdate
+      (updateData) => {
+        // Handle partial updates (could show retrieved docs count, etc.)
+        console.log('Update:', updateData);
+      },
+      // onComplete
+      (completeData) => {
+        setChatStatus('');
+        setLoading(false);
+        setChatMessages(prev => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: completeData.answer,
+            docs: completeData.docs
+          }
+        ]);
+        setSessionId(completeData.session_id);
+      },
+      // onError
+      (error) => {
+        setChatStatus('');
+        setLoading(false);
+        setChatMessages(prev => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: `⚠️ Error: ${error}`
+          }
+        ]);
+      }
+    );
+  };
 
   return (
     <div className="min-h-screen pb-16">
@@ -132,7 +183,9 @@ function App() {
                     ))}
                 </div>
 
-                {/* Search Bar */}
+                {/* Search Bar - Hidden in agent mode */}
+                {mode !== 'agent' && (
+                <>
                 <div className="flex flex-col lg:flex-row gap-4 items-end lg:items-center bg-[#E8E8E8] p-4 border-2 border-[#808080] border-t-black border-l-black">
                     <div className="flex-1 w-full space-y-2">
                         <label className="font-bold uppercase text-sm">Search Query:</label>
@@ -193,12 +246,42 @@ function App() {
                         "{enhancedQuery}"
                     </div>
                 )}
+                </>
+                )}
+                {/* End Search Bar Conditional */}
 
             </div>
         </Card>
 
         {/* Content Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {mode === 'agent' ? (
+            /* Agent Chat Mode */
+            <div className="space-y-6">
+                <Card title="Movie Search 5000 - AI Agent" contentClassName="p-4">
+                    <ChatInterface
+                        messages={chatMessages}
+                        onSendMessage={handleChatMessage}
+                        isLoading={loading}
+                        statusMessage={chatStatus}
+                    />
+                </Card>
+                
+                <Card title="About Agent Mode" contentClassName="p-4 bg-white">
+                    <div className="text-sm space-y-2">
+                        <p><strong>🤖 Agentic RAG:</strong> This mode uses a multi-step reasoning agent that:</p>
+                        <ul className="list-disc ml-6 space-y-1">
+                            <li>Enhances your query for better search results</li>
+                            <li>Searches the movie database intelligently</li>
+                            <li>Analyzes results and decides if more searching is needed</li>
+                            <li>Drafts comprehensive responses based on findings</li>
+                        </ul>
+                        <p className="text-gray-600 mt-2">Watch the status indicators to see the agent thinking!</p>
+                    </div>
+                </Card>
+            </div>
+        ) : (
+            /* Regular Search Results Mode */
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             
             {/* Left Column: Results */}
             <div className={clsx("space-y-6", ragAnswer ? "md:col-span-1" : "md:col-span-3")}>
@@ -259,6 +342,8 @@ function App() {
                 </div>
             )}
         </div>
+        )}
+        {/* End Content Grid Conditional */}
 
         <hr className="hr-groove my-12" />
 
